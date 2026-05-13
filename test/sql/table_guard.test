@@ -1,0 +1,23 @@
+# name: test/sql/table_guard.test
+# description: test table_guard extension
+# group: [sql]
+
+# Before we load the extension, this will fail
+statement error
+SELECT table_guard('Sam');
+----
+Catalog Error: Scalar Function with name table_guard does not exist!
+
+# Require statement will ensure this test is run with this extension loaded
+require table_guard
+
+# Confirm the extension works
+query I
+SELECT table_guard('Sam');
+----
+...........🦆 Sam
+
+query I
+SELECT table_guard_openssl_version('Michael') ILIKE 'TableGuard Michael, my linked OpenSSL version is OpenSSL%';
+----
+true
