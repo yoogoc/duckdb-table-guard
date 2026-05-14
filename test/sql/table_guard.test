@@ -1,6 +1,6 @@
 # name: test/sql/table_guard.test
 # description: test table_guard extension pragma functions and allowlist enforcement
-# group: [table_guard]
+# group: [sql]
 
 require table_guard
 
