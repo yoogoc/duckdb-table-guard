@@ -1,23 +1,121 @@
 # name: test/sql/table_guard.test
-# description: test table_guard extension
-# group: [sql]
+# description: test table_guard extension pragma functions and allowlist enforcement
+# group: [table_guard]
 
-# Before we load the extension, this will fail
-statement error
-SELECT table_guard('Sam');
-----
-Catalog Error: Scalar Function with name table_guard does not exist!
-
-# Require statement will ensure this test is run with this extension loaded
 require table_guard
 
-# Confirm the extension works
-query I
-SELECT table_guard('Sam');
+# --- Prepare test data ---
+
+statement ok
+ATTACH ':memory:' AS clinical_db;
+
+statement ok
+CREATE SCHEMA clinical_db.public;
+
+statement ok
+CREATE TABLE clinical_db.public.patients  (id INT, name VARCHAR);
+
+statement ok
+CREATE TABLE clinical_db.public.visits    (id INT, patient_id INT);
+
+statement ok
+CREATE TABLE clinical_db.public.audit_log (id INT, action VARCHAR);
+
+statement ok
+CREATE TABLE clinical_db.public.labs      (id INT, result VARCHAR);
+
+# --- Initial status: not initialized ---
+
+statement ok
+PRAGMA table_guard_status;
+
+# --- Enable before allow should fail ---
+
+statement error
+PRAGMA table_guard_enable;
 ----
-...........🦆 Sam
+TableGuard: call PRAGMA table_guard_allow(...) before enabling.
+
+# --- Set allowlist (only once per connection) ---
+
+statement ok
+PRAGMA table_guard_allow('clinical_db.public.patients, clinical_db.public.visits');
+
+statement ok
+PRAGMA table_guard_status;
+
+# --- Allowed queries ---
 
 query I
-SELECT table_guard_openssl_version('Michael') ILIKE 'TableGuard Michael, my linked OpenSSL version is OpenSSL%';
+SELECT 'patients OK' AS test FROM clinical_db.public.patients LIMIT 0;
 ----
-true
+
+query I
+SELECT 'visits OK' AS test FROM clinical_db.public.visits LIMIT 0;
+----
+
+# --- Blocked queries (not in allowlist) ---
+
+statement error
+SELECT * FROM clinical_db.public.audit_log;
+----
+TableGuard: "clinical_db.public.audit_log" is not in the allowlist.
+
+statement error
+SELECT * FROM clinical_db.public.labs;
+----
+TableGuard: "clinical_db.public.labs" is not in the allowlist.
+
+# --- Second allow should fail ---
+
+statement error
+PRAGMA table_guard_allow('clinical_db.public.labs');
+----
+TableGuard: allowlist has already been configured for this connection and cannot be changed.
+
+# --- Disable / re-enable ---
+
+statement ok
+PRAGMA table_guard_disable;
+
+query I
+SELECT 'audit_log accessible after disable' AS test FROM clinical_db.public.audit_log LIMIT 0;
+----
+
+statement ok
+PRAGMA table_guard_enable;
+
+statement error
+SELECT * FROM clinical_db.public.audit_log;
+----
+TableGuard: "clinical_db.public.audit_log" is not in the allowlist.
+
+# --- Final check: allowed tables still work after re-enable ---
+
+query I
+SELECT 'patients still OK' AS test FROM clinical_db.public.patients LIMIT 0;
+----
+
+# --- Metadata filtering: duckdb_tables only shows allowed tables ---
+
+query I rowsort
+SELECT table_name FROM duckdb_tables() WHERE database_name='clinical_db';
+----
+patients
+visits
+
+# --- Metadata filtering: duckdb_columns only shows allowed tables ---
+
+query I rowsort
+SELECT DISTINCT table_name FROM duckdb_columns() WHERE database_name='clinical_db';
+----
+patients
+visits
+
+# --- Metadata filtering works with partial projection (no database_name in SELECT) ---
+
+query II rowsort
+SELECT schema_name, table_name FROM duckdb_tables() WHERE database_name='clinical_db';
+----
+public	patients
+public	visits
