@@ -28,3 +28,78 @@ jobs:
       ci_tools_version: v1.5-variegata
       extension_name: table_guard
       format_checks: 'format;tidy'
+
+  deploy:
+    name: Deploy to R2
+    needs: duckdb-stable-build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    strategy:
+      matrix:
+        arch:
+          - linux_amd64
+          - linux_amd64_gcc4
+          - linux_arm64
+          - osx_amd64
+          - osx_arm64
+          - windows_amd64
+    env:
+      EXTENSION_NAME: table_guard
+      DUCKDB_VERSION: v1.5.2
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: table_guard-v1.5.2-extension-${{ matrix.arch }}
+          path: /tmp/extension
+
+      - name: Deploy extension to Cloudflare R2
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          DUCKDB_EXTENSION_SIGNING_PK: ${{ secrets.EXTENSION_SIGNING_PK }}
+        run: |
+          python3 -m pip install awscli
+
+          ext="/tmp/extension/${EXTENSION_NAME}.duckdb_extension"
+
+          # Sign extension
+          cat $ext > $ext.append
+          ( command -v truncate && truncate -s -256 $ext.append ) || ( command -v gtruncate && gtruncate -s -256 $ext.append )
+
+          if [ "$DUCKDB_EXTENSION_SIGNING_PK" != "" ]; then
+            echo "$DUCKDB_EXTENSION_SIGNING_PK" > private.pem
+            openssl dgst -sha256 -binary $ext.append > $ext.hash
+            openssl pkeyutl -sign -in $ext.hash -inkey private.pem -pkeyopt digest:sha256 -out $ext.sign
+            rm -f private.pem $ext.hash
+          else
+            dd if=/dev/zero of=$ext.sign bs=256 count=1
+          fi
+
+          cat $ext.sign >> $ext.append
+          rm $ext.sign
+          gzip < $ext.append > "$ext.compressed"
+          rm $ext.append
+
+          # Get extension version
+          EXT_VERSION=$(git tag --points-at HEAD)
+          EXT_VERSION=${EXT_VERSION:-$(git log -1 --format=%h)}
+
+          # Upload latest (DuckDB client looks up this path)
+          aws s3 cp "$ext.compressed" \
+            "s3://${BUCKET_NAME}/${DUCKDB_VERSION}/${{ matrix.arch }}/${EXTENSION_NAME}.duckdb_extension.gz" \
+            --region auto
+
+          # Upload versioned
+          aws s3 cp "$ext.compressed" \
+            "s3://${BUCKET_NAME}/${EXTENSION_NAME}/${EXT_VERSION}/${DUCKDB_VERSION}/${{ matrix.arch }}/${EXTENSION_NAME}.duckdb_extension.gz" \
+            --region auto
+
+          rm "$ext.compressed"
