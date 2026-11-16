@@ -5,6 +5,7 @@ A DuckDB extension that enforces table-level access control via an allowlist mec
 ## Features
 
 - **Table-level allowlist**: restrict queries to only the tables you explicitly permit
+- **Iceberg REST catalogs**: check attached Iceberg tables using their bound catalog, schema, and table name
 - **Catalog.schema.table granularity**: support `catalog.schema.table`, `schema.table`, or bare `table` patterns, with `*` as wildcard
 - **One-time configuration**: the allowlist can only be set once per connection, preventing runtime tampering
 - **Metadata filtering**: automatically filters `duckdb_tables()`, `duckdb_views()`, and `duckdb_columns()` so that only allowed tables are visible
@@ -42,6 +43,8 @@ PRAGMA table_guard_status;
 ```
 
 ## Allowlist Format
+
+For an attached Iceberg catalog, use the DuckDB attachment name as the catalog component. With `lake` attached, `lake.clinical.patients` grants access to that table. While the guard is enabled, Iceberg table functions without a bound catalog table are rejected.
 
 Entries are comma-separated and support three levels of specificity:
 
