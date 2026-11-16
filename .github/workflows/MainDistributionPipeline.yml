@@ -16,7 +16,7 @@ jobs:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
     with:
-      duckdb_version: v1.5.2
+      duckdb_version: v1.5.6
       ci_tools_version: v1.5-variegata
       extension_name: table_guard
 
@@ -24,7 +24,7 @@ jobs:
     name: Code Quality Check
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.5-variegata
     with:
-      duckdb_version: v1.5.2
+      duckdb_version: v1.5.6
       ci_tools_version: v1.5-variegata
       extension_name: table_guard
       format_checks: 'format;tidy'
@@ -44,7 +44,7 @@ jobs:
           - windows_amd64
     env:
       EXTENSION_NAME: table_guard
-      DUCKDB_VERSION: v1.5.2
+      DUCKDB_VERSION: v1.5.6
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +53,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: table_guard-v1.5.2-extension-${{ matrix.arch }}
+          name: table_guard-${{ env.DUCKDB_VERSION }}-extension-${{ matrix.arch }}
           path: /tmp/extension
 
       - name: Deploy extension to Cloudflare R2

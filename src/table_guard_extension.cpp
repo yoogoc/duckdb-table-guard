@@ -13,7 +13,6 @@
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/function/pragma_function.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
-#include "duckdb/function/table/table_scan.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/printer.hpp"
@@ -109,24 +108,6 @@ static shared_ptr<TableGuardState> GetGuardState(ClientContext &ctx) {
 
 static shared_ptr<TableGuardState> EnsureGuardState(ClientContext &ctx) {
 	return ctx.registered_state->GetOrCreate<TableGuardState>(GUARD_KEY);
-}
-
-// ---------------------------------------------------------------------------
-// Optimizer Pass: walk the logical plan tree, check all base table scans
-// ---------------------------------------------------------------------------
-
-static bool ExtractTableIdentifier(const LogicalGet &get, string &out_catalog, string &out_schema, string &out_table) {
-	if (get.function.name != "seq_scan" || !get.bind_data) {
-		return false;
-	}
-
-	auto &scan_data = get.bind_data->Cast<TableScanBindData>();
-	auto &entry = scan_data.table;
-
-	out_catalog = entry.schema.catalog.GetName();
-	out_schema = entry.schema.name;
-	out_table = entry.name;
-	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,8 +240,12 @@ static void WalkPlan(unique_ptr<LogicalOperator> &op_ptr, const TableGuardState 
 	if (op.type == LogicalOperatorType::LOGICAL_GET) {
 		auto &get = op.Cast<LogicalGet>();
 
-		string catalog, schema, table;
-		if (ExtractTableIdentifier(get, catalog, schema, table)) {
+		// Both native and Iceberg catalog scans expose their bound table through GetTable().
+		auto table_entry = get.bind_data ? get.GetTable() : nullptr;
+		if (table_entry) {
+			const auto &catalog = table_entry->ParentCatalog().GetName();
+			const auto &schema = table_entry->ParentSchema().name;
+			const auto &table = table_entry->name;
 			bool ok = false;
 			for (const auto &entry : guard.allowed) {
 				if (entry.matches(catalog, schema, table)) {
@@ -275,6 +260,11 @@ static void WalkPlan(unique_ptr<LogicalOperator> &op_ptr, const TableGuardState 
 				                          catalog, schema, table, guard.AllowedStr());
 			}
 			return;
+		}
+
+		if (StringUtil::StartsWith(get.function.name, "iceberg_")) {
+			throw PermissionException("TableGuard: Iceberg function \"%s\" requires a bound catalog table.",
+			                          get.function.name);
 		}
 
 		for (const auto &meta_func : METADATA_FUNCTIONS) {
@@ -300,7 +290,8 @@ static void WalkPlan(unique_ptr<LogicalOperator> &op_ptr, const TableGuardState 
 
 struct TableGuardOptimizer : OptimizerExtension {
 	TableGuardOptimizer() {
-		optimize_function = Run;
+		// Authorize scans before optimizations can remove them (for example, LIMIT 0).
+		pre_optimize_function = Run;
 	}
 
 	static void Run(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {

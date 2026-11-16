@@ -9,3 +9,9 @@ or
 ```bash
 make test_debug
 ```
+
+To run the Iceberg REST integration test, use a DuckDB 1.5.6 CLI with `httpfs`, `avro`, and `iceberg` installed. The test starts a local catalog and loads the extension binary built for your platform.
+
+```bash
+python3 test/iceberg_rest_test.py build/release/extension/table_guard/table_guard.duckdb_extension
+```
