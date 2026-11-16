@@ -23,10 +23,13 @@ def empty_table_metadata(location):
         "last-updated-ms": 1,
         "last-column-id": 1,
         "current-schema-id": 0,
-        "schemas": [{
-            "type": "struct", "schema-id": 0,
-            "fields": [{"id": 1, "name": "id", "required": True, "type": "int"}],
-        }],
+        "schemas": [
+            {
+                "type": "struct",
+                "schema-id": 0,
+                "fields": [{"id": 1, "name": "id", "required": True, "type": "int"}],
+            }
+        ],
         "default-spec-id": 0,
         "partition-specs": [{"spec-id": 0, "fields": []}],
         "last-partition-id": 1000,
@@ -50,11 +53,10 @@ def rest_catalog(directory):
         metadata_path.parent.mkdir(parents=True)
         metadata = empty_table_metadata(location)
         metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-        responses["/v1/namespaces/clinical/tables"]["identifiers"].append(
-            {"namespace": ["clinical"], "name": table}
-        )
+        responses["/v1/namespaces/clinical/tables"]["identifiers"].append({"namespace": ["clinical"], "name": table})
         responses[f"/v1/namespaces/clinical/tables/{table}"] = {
-            "metadata-location": str(metadata_path), "metadata": metadata,
+            "metadata-location": str(metadata_path),
+            "metadata": metadata,
         }
 
     class CatalogHandler(BaseHTTPRequestHandler):
@@ -99,21 +101,28 @@ def check_queries(duckdb, extension_path, directory, port):
         ("WITH audit AS (SELECT * FROM audit_log) SELECT * FROM audit", "", audit_denied),
         ("SELECT * FROM audit_view", "", audit_denied),
         (
-            "SELECT * FROM patients JOIN audit_log USING (id)", "", audit_denied,
+            "SELECT * FROM patients JOIN audit_log USING (id)",
+            "",
+            audit_denied,
         ),
         (
-            "SELECT * FROM other_lake.clinical.patients", "",
+            "SELECT * FROM other_lake.clinical.patients",
+            "",
             'TableGuard: "other_lake.clinical.patients" is not in the allowlist.',
         ),
         (
-            f"SELECT * FROM iceberg_scan({sql_literal(metadata_path)})", "",
+            f"SELECT * FROM iceberg_scan({sql_literal(metadata_path)})",
+            "",
             'TableGuard: Iceberg function "iceberg_scan" requires a bound catalog table.',
         ),
     ]
     for sql, output, error in queries:
         result = subprocess.run(
             [duckdb, "-unsigned", "-bail", "-batch", "-csv", "-noheader"],
-            input=f"{setup}\n{sql};\n", text=True, capture_output=True, timeout=30,
+            input=f"{setup}\n{sql};\n",
+            text=True,
+            capture_output=True,
+            timeout=30,
         )
         if error is None:
             passed = result.returncode == 0 and result.stdout.strip() == output
